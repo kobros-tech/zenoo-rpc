@@ -173,7 +173,39 @@ if __name__ == "__main__":
 
 ## 🔌 MCP Integration - AI Assistant Support
 
-Zenoo RPC provides full **Model Context Protocol (MCP)** support, enabling seamless integration with AI assistants like Claude Desktop, ChatGPT, and other MCP-compatible tools.
+Zenoo RPC provides full **Model Context Protocol (MCP)** support, enabling seamless integration with AI assistants like Letta AI, Claude Desktop, and other MCP-compatible tools.
+
+### 🚀 Quick Start (Letta Cloud)
+
+```bash
+# 1. Start HTTP proxy (wraps MCP server with REST API)
+./scripts/start_http_proxy.sh
+
+# 2. Test locally
+./scripts/test_http_proxy.sh
+
+# 3. Expose with ngrok for Letta Cloud
+ngrok http 8080
+
+# 4. Configure in Letta Cloud dashboard
+#    URL: [your ngrok URL]
+#    Auth: Bearer Token
+#    Token: letta-secret-123
+```
+
+### 🏗️ Architecture
+
+```
+Letta Cloud ──HTTPS──> HTTP Proxy ──stdio──> MCP Server ──> Odoo
+            (ngrok)   (REST API)   (subprocess) (FastMCP)
+```
+
+The HTTP proxy provides a simple REST API wrapper around the MCP server, avoiding SSE/authentication complexity.
+
+**Key Files:**
+- `mcp_http_proxy.py` - HTTP proxy server
+- `scripts/start_http_proxy.sh` - Easy startup
+- `scripts/test_http_proxy.sh` - Test endpoints
 
 ### 🤖 Use with Claude Desktop
 
@@ -197,7 +229,13 @@ Configure Claude Desktop to use Zenoo RPC as an MCP server:
 }
 ```
 
-Now Claude can directly interact with your Odoo data:
+### 📚 Documentation
+
+- **[Quick Start](docs/QUICKSTART-HTTP-PROXY.md)** - Get started in 5 minutes
+- **[Architecture](docs/mcp-http-proxy-architecture.md)** - System design
+- **[Complete Guide](docs/mcp-integration-README.md)** - All documentation
+
+Now Claude or Letta can directly interact with your Odoo data:
 
 ```
 User: "Find all technology companies in Vietnam and analyze their sales"

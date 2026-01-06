@@ -240,18 +240,77 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             offset: int = 0,
             order: str = None
         ) -> Dict[str, Any]:
-            """Search for records in an Odoo model.
-            
+            """Search for records in an Odoo model using basic domain filters.
+
+            This is the fundamental search tool for querying Odoo records. Use this for simple
+            searches with Odoo's native domain syntax. For more advanced filtering with lookup
+            expressions, use the complex_search tool instead.
+
             Args:
-                model: Odoo model name (e.g., 'res.partner', 'sale.order')
-                domain: Search domain (e.g., [['name', 'ilike', 'John']])
-                fields: Fields to retrieve (default: all)
-                limit: Maximum number of records (default: 100)
-                offset: Number of records to skip (default: 0)
-                order: Sort order (e.g., 'name ASC')
-            
+                model: Odoo model name to search
+                    Examples: "res.partner", "sale.order", "product.product", "account.move"
+
+                domain: Odoo domain filter as a list of conditions (default: [] for all records)
+                    Format: [["field", "operator", "value"], ...]
+                    Operators: "=", "!=", ">", ">=", "<", "<=", "like", "ilike", "in", "not in"
+                    Logic: Use "|" for OR, "&" for AND (AND is default)
+                    Examples:
+                    - [["name", "ilike", "John"]] - Name contains "John" (case-insensitive)
+                    - [["active", "=", True], ["customer_rank", ">", 0]] - Active customers
+                    - ["|", ["email", "!=", False], ["phone", "!=", False]] - Has email OR phone
+
+                fields: List of field names to retrieve (default: None retrieves all fields)
+                    Examples: ["id", "name", "email"], ["id", "display_name", "partner_id"]
+                    Note: Specifying fewer fields improves performance for large datasets
+
+                limit: Maximum number of records to return (default: 100)
+                    Use lower limits for faster responses, higher for bulk data retrieval
+
+                offset: Number of records to skip, useful for pagination (default: 0)
+                    Example: offset=0 limit=50 (page 1), offset=50 limit=50 (page 2)
+
+                order: Sort order specification (default: None for natural order)
+                    Format: "field_name ASC" or "field_name DESC"
+                    Examples: "name ASC", "create_date DESC", "partner_id, date_order DESC"
+
             Returns:
-                Dictionary with search results and metadata
+                Dictionary containing:
+                - records: List of matching record dictionaries
+                - count: Number of records returned (up to limit)
+                - model: Model name that was searched
+                - domain: Domain filter that was applied
+                - total_count: Total matching records (if available)
+
+            Examples:
+                # Search for all active partners
+                {
+                    "model": "res.partner",
+                    "domain": [["active", "=", True]],
+                    "limit": 50
+                }
+
+                # Search for recent sales orders with specific fields
+                {
+                    "model": "sale.order",
+                    "domain": [["date_order", ">=", "2025-01-01"], ["state", "=", "sale"]],
+                    "fields": ["id", "name", "partner_id", "amount_total", "date_order"],
+                    "order": "date_order DESC",
+                    "limit": 25
+                }
+
+                # Pagination example - get second page of partners
+                {
+                    "model": "res.partner",
+                    "domain": [["is_company", "=", True]],
+                    "limit": 20,
+                    "offset": 20
+                }
+
+            Notes:
+                - For complex filtering with lookup expressions (ilike, gt, lt, etc.), use complex_search
+                - Empty domain [] returns all records (subject to limit)
+                - Use fields parameter to improve performance when you don't need all data
+                - Combine with offset/limit for efficient pagination
             """
             return await self._execute_tool("search_records", {
                 "model": model,
@@ -268,15 +327,58 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             record_id: int,
             fields: List[str] = None
         ) -> Dict[str, Any]:
-            """Get a specific record by ID.
-            
+            """Retrieve a single specific record by its ID from an Odoo model.
+
+            Use this tool when you know the exact record ID and want to fetch its data.
+            This is faster than searching when you have the ID. Returns all fields by default,
+            or specify which fields you need for better performance.
+
             Args:
-                model: Odoo model name
-                record_id: Record ID
-                fields: Fields to retrieve (default: all)
-            
+                model: Odoo model name where the record exists
+                    Examples: "res.partner", "sale.order", "product.product", "res.users"
+
+                record_id: The unique integer ID of the record to retrieve
+                    Note: This is the internal Odoo record ID (integer), not external references
+
+                fields: Optional list of specific field names to retrieve (default: None for all fields)
+                    Examples: ["id", "name", "email", "phone"], ["display_name", "partner_id"]
+                    Tip: Requesting fewer fields improves performance and reduces response size
+
             Returns:
-                Record data
+                Dictionary containing:
+                - record: Dictionary with the record's field values
+                - model: Model name
+                - record_id: ID of the retrieved record
+
+            Examples:
+                # Get full partner record
+                {
+                    "model": "res.partner",
+                    "record_id": 42
+                }
+
+                # Get specific fields from a sales order
+                {
+                    "model": "sale.order",
+                    "record_id": 150,
+                    "fields": ["id", "name", "partner_id", "amount_total", "state", "date_order"]
+                }
+
+                # Get user information
+                {
+                    "model": "res.users",
+                    "record_id": 2,
+                    "fields": ["id", "name", "login", "email", "company_id"]
+                }
+
+            Error Handling:
+                - Returns error if record_id does not exist in the model
+                - Returns error if specified fields don't exist in the model
+
+            Notes:
+                - Much faster than search_records when you know the exact ID
+                - Use fields parameter to optimize performance for large records
+                - Related fields (Many2one, One2many) may return just IDs unless explicitly requested
             """
             return await self._execute_tool("get_record", {
                 "model": model,
@@ -289,14 +391,91 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             model: str,
             values: Dict[str, Any]
         ) -> Dict[str, Any]:
-            """Create a new record.
-            
+            """Create a new record in an Odoo model with specified field values.
+
+            Creates a single new record and returns its ID and data. Field values are validated
+            according to the model's field definitions. Required fields must be provided unless
+            they have default values in Odoo.
+
             Args:
-                model: Odoo model name
-                values: Field values for the new record
-            
+                model: Odoo model name where the record will be created
+                    Examples: "res.partner", "sale.order", "product.product", "crm.lead"
+
+                values: Dictionary of field names and their values for the new record
+                    Format: {"field_name": value, ...}
+                    - Simple fields: Use direct values (strings, numbers, booleans)
+                    - Many2one fields: Use integer ID of related record
+                    - One2many/Many2many: Use special commands (see examples)
+                    - Date fields: Use "YYYY-MM-DD" format
+                    - Datetime fields: Use "YYYY-MM-DD HH:MM:SS" format
+
             Returns:
-                Created record data
+                Dictionary containing:
+                - record: Created record data with all field values
+                - model: Model name
+                - created: True (confirmation flag)
+                - id: ID of the newly created record
+
+            Examples:
+                # Create a new partner (contact/company)
+                {
+                    "model": "res.partner",
+                    "values": {
+                        "name": "Acme Corporation",
+                        "email": "contact@acme.com",
+                        "phone": "+1-555-0123",
+                        "is_company": true,
+                        "street": "123 Main St",
+                        "city": "New York",
+                        "country_id": 233  # USA country ID
+                    }
+                }
+
+                # Create a sales order
+                {
+                    "model": "sale.order",
+                    "values": {
+                        "partner_id": 42,
+                        "date_order": "2025-01-15",
+                        "order_line": [
+                            [0, 0, {
+                                "product_id": 10,
+                                "product_uom_qty": 5,
+                                "price_unit": 99.99
+                            }]
+                        ]
+                    }
+                }
+
+                # Create a product
+                {
+                    "model": "product.product",
+                    "values": {
+                        "name": "Premium Widget",
+                        "type": "product",
+                        "list_price": 149.99,
+                        "standard_price": 75.00,
+                        "categ_id": 1
+                    }
+                }
+
+            One2many/Many2many Commands:
+                Use these command tuples to manage related records:
+                - [0, 0, {values}]: Create new related record with values
+                - [4, id]: Link existing record with given ID
+                - [6, 0, [ids]]: Replace all with list of IDs
+
+            Validation:
+                - Required fields must be provided (or have defaults)
+                - Field types are validated (string, integer, float, boolean, etc.)
+                - Foreign key references must point to existing records
+                - Returns error if validation fails
+
+            Notes:
+                - For bulk creation, use batch_operation tool instead
+                - Created record ID is returned in the response
+                - Some computed fields may be auto-populated by Odoo
+                - Odoo may apply default values for fields not specified
             """
             return await self._execute_tool("create_record", {
                 "model": model,
@@ -309,15 +488,103 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             record_id: int,
             values: Dict[str, Any]
         ) -> Dict[str, Any]:
-            """Update an existing record.
-            
+            """Update an existing record by modifying specific field values.
+
+            Modifies only the fields specified in the values dictionary. All other fields
+            remain unchanged. The record must exist or an error will be returned. Field
+            values are validated according to model constraints.
+
             Args:
-                model: Odoo model name
-                record_id: Record ID to update
-                values: Field values to update
-            
+                model: Odoo model name containing the record to update
+                    Examples: "res.partner", "sale.order", "product.product", "crm.lead"
+
+                record_id: Integer ID of the existing record to update
+                    Note: This must be a valid, existing record ID
+
+                values: Dictionary of field names and new values to update
+                    Format: {"field_name": new_value, ...}
+                    - Only specify fields you want to change
+                    - Omitted fields retain their current values
+                    - Many2one fields: Use integer ID of related record
+                    - One2many/Many2many: Use special commands (see examples below)
+                    - Set field to False/null: Use False or None
+
             Returns:
-                Updated record data
+                Dictionary containing:
+                - record: Updated record data with new field values
+                - model: Model name
+                - updated: True (confirmation flag)
+
+            Examples:
+                # Update partner contact information
+                {
+                    "model": "res.partner",
+                    "record_id": 42,
+                    "values": {
+                        "email": "newemail@acme.com",
+                        "phone": "+1-555-9999",
+                        "mobile": "+1-555-8888"
+                    }
+                }
+
+                # Update sales order state and add notes
+                {
+                    "model": "sale.order",
+                    "record_id": 150,
+                    "values": {
+                        "state": "sale",
+                        "note": "Customer requested expedited shipping"
+                    }
+                }
+
+                # Update product pricing
+                {
+                    "model": "product.product",
+                    "record_id": 25,
+                    "values": {
+                        "list_price": 199.99,
+                        "standard_price": 100.00
+                    }
+                }
+
+                # Update One2many field (e.g., adding order lines)
+                {
+                    "model": "sale.order",
+                    "record_id": 150,
+                    "values": {
+                        "order_line": [
+                            [0, 0, {"product_id": 15, "product_uom_qty": 2, "price_unit": 50.00}],
+                            [1, 123, {"product_uom_qty": 5}],
+                            [2, 124]
+                        ]
+                    }
+                }
+
+            One2many/Many2many Update Commands:
+                - [0, 0, {values}]: Create and link new related record
+                - [1, id, {values}]: Update existing related record with given ID
+                - [2, id]: Delete related record with given ID
+                - [3, id]: Unlink (remove relation but don't delete) record with ID
+                - [4, id]: Link existing record
+                - [5]: Unlink all (clear all relations)
+                - [6, 0, [ids]]: Replace all relations with given IDs
+
+            Validation:
+                - Record must exist (checked before update)
+                - Field constraints are validated
+                - Related record IDs must exist
+                - Returns error if validation fails
+
+            Error Handling:
+                - Returns error if record_id doesn't exist
+                - Returns error if fields don't exist in model
+                - Returns error if values don't meet field constraints
+
+            Notes:
+                - For bulk updates, use batch_operation tool instead
+                - Only specified fields are updated; others remain unchanged
+                - Some computed fields may be automatically recalculated
+                - Workflow triggers and constraints are respected
             """
             return await self._execute_tool("update_record", {
                 "model": model,
@@ -330,14 +597,79 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             model: str,
             record_id: int
         ) -> Dict[str, Any]:
-            """Delete a record.
+            """Permanently delete a record from an Odoo model.
+
+            Removes the specified record from the database. This operation is irreversible
+            and will also handle related records according to the model's ondelete constraints
+            (cascade, restrict, set null, etc.). Use with caution.
 
             Args:
-                model: Odoo model name
-                record_id: Record ID to delete
+                model: Odoo model name containing the record to delete
+                    Examples: "res.partner", "sale.order", "product.product", "crm.lead"
+
+                record_id: Integer ID of the record to permanently delete
+                    Warning: This record will be completely removed from the database
 
             Returns:
-                Deletion confirmation
+                Dictionary containing:
+                - id: ID of the deleted record
+                - model: Model name
+                - deleted: True (confirmation flag)
+
+            Examples:
+                # Delete a draft partner record
+                {
+                    "model": "res.partner",
+                    "record_id": 999
+                }
+
+                # Delete a cancelled sales order
+                {
+                    "model": "sale.order",
+                    "record_id": 150
+                }
+
+                # Delete a test product
+                {
+                    "model": "product.product",
+                    "record_id": 1234
+                }
+
+            Important Warnings:
+                - PERMANENT: Deleted records cannot be recovered
+                - CASCADE: May delete related records if ondelete='cascade' is set
+                - CONSTRAINTS: Deletion may fail if other records depend on this one
+                - AUDIT: Consider using 'active=False' instead of deletion for audit trails
+
+            Related Record Behavior (ondelete):
+                - cascade: Related records are also deleted
+                - restrict: Deletion fails if related records exist
+                - set null: Foreign keys in related records are set to null
+                - set default: Foreign keys are set to default value
+
+            Error Handling:
+                - Returns error if record_id doesn't exist
+                - Returns error if deletion violates database constraints
+                - Returns error if user lacks delete permissions
+
+            Alternatives to Deletion:
+                Instead of permanent deletion, consider:
+                - Archive: Update 'active' field to False (if model supports it)
+                - Cancel: Update 'state' field to 'cancel'
+                - Mark as obsolete: Use custom status fields
+
+            Best Practices:
+                - Verify record exists before deletion (use get_record first)
+                - Check for dependent records that might be affected
+                - Use batch_operation for deleting multiple records
+                - Prefer archiving over deletion when possible for audit trails
+                - Test deletions in development environment first
+
+            Notes:
+                - For bulk deletion, use batch_operation tool instead
+                - Some models may override unlink() with custom logic
+                - System/admin records may have deletion restrictions
+                - Deletion triggers model constraints and business logic
             """
             return await self._execute_tool("delete_record", {
                 "model": model,
@@ -353,17 +685,71 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             limit: int = 100,
             include_relationships: bool = False
         ) -> Dict[str, Any]:
-            """Advanced search using QueryBuilder with complex filters.
+            """Advanced search using QueryBuilder with complex filters and Django-like lookup expressions.
+
+            Supports powerful filtering with multiple operators and automatic AND combination of filters.
 
             Args:
-                model: Odoo model name
-                filters: Complex filters using Django-like syntax
-                order_by: Sort order (e.g., 'name', '-date_order')
-                limit: Maximum number of records
-                include_relationships: Whether to include related data
+                model: Odoo model name (e.g., 'res.partner', 'sale.order')
+                filters: Complex filters using lookup expressions. Supports two formats:
+                    1. Simple: {"name": "John", "active": true}
+                    2. Complex: {"name": {"ilike": "%john%"}, "customer_rank": {"gt": 0}}
+
+                    Available lookup expressions:
+                    - ilike: Case-insensitive pattern match (e.g., {"name": {"ilike": "%company%"}})
+                    - gt/gte: Greater than / greater than or equal (e.g., {"customer_rank": {"gt": 0}})
+                    - lt/lte: Less than / less than or equal (e.g., {"age": {"lt": 65}})
+                    - ne: Not equal (e.g., {"email": {"ne": false}})
+                    - in: Value in list (e.g., {"id": {"in": [1, 2, 3]}})
+                    - Direct value: Exact match (e.g., {"is_company": true})
+
+                order_by: Sort field(s). Prefix with '-' for descending order
+                    Examples: 'name', '-create_date', 'city,name'
+                limit: Maximum number of records to return (default: 100)
+                include_relationships: Include related record data (default: false)
 
             Returns:
-                Search results with metadata
+                Dictionary with:
+                - records: List of matching records
+                - count: Number of records returned
+                - model: Model name searched
+                - filters_applied: Filters that were applied
+                - order_by: Ordering used
+                - includes_relationships: Whether relationships were included
+
+            Examples:
+                # Search for active companies with email
+                {
+                    "model": "res.partner",
+                    "filters": {
+                        "is_company": true,
+                        "active": true,
+                        "email": {"ne": false}
+                    },
+                    "order_by": "name",
+                    "limit": 50
+                }
+
+                # Search with pattern matching and date range
+                {
+                    "model": "res.partner",
+                    "filters": {
+                        "name": {"ilike": "%tech%"},
+                        "create_date": {"gte": "2025-01-01"}
+                    },
+                    "order_by": "-create_date",
+                    "limit": 25
+                }
+
+                # Search specific IDs with relationships
+                {
+                    "model": "res.partner",
+                    "filters": {
+                        "id": {"in": [1, 2, 3, 10, 20]}
+                    },
+                    "include_relationships": true,
+                    "limit": 10
+                }
             """
             return await self._execute_tool("complex_search", {
                 "model": model,
@@ -379,15 +765,70 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             model: str,
             records: List[Dict[str, Any]]
         ) -> Dict[str, Any]:
-            """Perform batch operations for high performance.
+            """Perform batch operations (create, update, delete) on multiple records for high performance.
+
+            Processes multiple records in a single operation, ideal for bulk data manipulation.
+            All records are processed individually but returned together for efficiency.
 
             Args:
-                operation: Operation type ('create', 'update', 'delete')
-                model: Odoo model name
-                records: List of record data
+                operation: Operation type - must be one of:
+                    - 'create': Create multiple new records
+                    - 'update': Update multiple existing records (requires 'id' in each record)
+                    - 'delete': Delete multiple records (requires 'id' in each record)
+
+                model: Odoo model name (e.g., 'res.partner', 'sale.order', 'product.product')
+
+                records: List of record dictionaries. Structure depends on operation:
+                    - For 'create': List of dicts with field values (no 'id' needed)
+                    - For 'update': List of dicts with 'id' + fields to update
+                    - For 'delete': List of dicts with 'id' field only
 
             Returns:
-                Batch operation results
+                Dictionary with:
+                - operation: The operation that was performed
+                - model: Model name
+                - processed_count: Number of records processed
+                - results: List of operation results for each record
+
+            Examples:
+                # Batch create multiple partners
+                {
+                    "operation": "create",
+                    "model": "res.partner",
+                    "records": [
+                        {"name": "Company A", "email": "info@companya.com", "is_company": true},
+                        {"name": "Company B", "email": "info@companyb.com", "is_company": true},
+                        {"name": "John Doe", "email": "john@example.com", "is_company": false}
+                    ]
+                }
+
+                # Batch update multiple partners
+                {
+                    "operation": "update",
+                    "model": "res.partner",
+                    "records": [
+                        {"id": 10, "phone": "+1-555-0001", "active": true},
+                        {"id": 20, "phone": "+1-555-0002", "city": "New York"},
+                        {"id": 30, "email": "updated@example.com"}
+                    ]
+                }
+
+                # Batch delete multiple partners
+                {
+                    "operation": "delete",
+                    "model": "res.partner",
+                    "records": [
+                        {"id": 100},
+                        {"id": 101},
+                        {"id": 102}
+                    ]
+                }
+
+            Notes:
+                - All operations process records sequentially but return together
+                - For 'update' and 'delete', the 'id' field is required in each record
+                - Failed operations for individual records will be reflected in results
+                - Use this for bulk operations instead of calling individual create/update/delete
             """
             return await self._execute_tool("batch_operation", {
                 "operation": operation,
@@ -403,17 +844,86 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             filters: Dict[str, Any] = None,
             date_range: Dict[str, str] = None
         ) -> Dict[str, Any]:
-            """Perform analytics queries with aggregation.
+            """Perform analytics queries with grouping and aggregation functions for data analysis.
+
+            Enables powerful data analytics by grouping records and applying aggregate functions
+            like sum, count, avg, min, max. Ideal for reports, dashboards, and business intelligence.
 
             Args:
-                model: Odoo model name
-                group_by: Fields to group by
-                aggregates: Aggregation functions (e.g., {'total': 'sum', 'count': 'count'})
-                filters: Optional filters
-                date_range: Optional date range filter
+                model: Odoo model name (e.g., 'sale.order', 'account.move', 'res.partner')
+
+                group_by: List of field names to group results by
+                    Examples: ['state'], ['partner_id', 'state'], ['create_date']
+
+                aggregates: Dictionary mapping result field names to aggregate functions
+                    Supported functions: 'sum', 'count', 'avg', 'min', 'max'
+                    Format: {'result_name': 'function:field_name'}
+                    Examples:
+                    - {'total_amount': 'sum:amount_total', 'order_count': 'count:id'}
+                    - {'average_price': 'avg:price_unit', 'max_qty': 'max:product_qty'}
+
+                filters: Optional filters to apply before aggregation (same format as complex_search)
+                    Examples: {'state': 'sale'}, {'partner_id': {'ne': false}}
+
+                date_range: Optional date range filter for time-based analysis
+                    Format: {'field': 'date_field_name', 'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}
+                    Example: {'field': 'date_order', 'start': '2025-01-01', 'end': '2025-12-31'}
 
             Returns:
-                Analytics results
+                Dictionary with:
+                - model: Model name analyzed
+                - groups: List of grouped results with aggregate values
+                - group_by: Fields used for grouping
+                - aggregates: Aggregations applied
+                - total_groups: Number of groups returned
+
+            Examples:
+                # Sales by partner
+                {
+                    "model": "sale.order",
+                    "group_by": ["partner_id"],
+                    "aggregates": {
+                        "total_sales": "sum:amount_total",
+                        "order_count": "count:id"
+                    },
+                    "filters": {"state": "sale"}
+                }
+
+                # Monthly sales revenue with date range
+                {
+                    "model": "sale.order",
+                    "group_by": ["create_date"],
+                    "aggregates": {
+                        "revenue": "sum:amount_total",
+                        "avg_order": "avg:amount_total",
+                        "orders": "count:id"
+                    },
+                    "filters": {"state": "sale"},
+                    "date_range": {
+                        "field": "date_order",
+                        "start": "2025-01-01",
+                        "end": "2025-12-31"
+                    }
+                }
+
+                # Product inventory analysis
+                {
+                    "model": "product.product",
+                    "group_by": ["categ_id"],
+                    "aggregates": {
+                        "total_qty": "sum:qty_available",
+                        "product_count": "count:id",
+                        "avg_price": "avg:list_price"
+                    },
+                    "filters": {"active": true}
+                }
+
+            Notes:
+                - Results are automatically grouped by the specified fields
+                - Aggregate functions operate on all records within each group
+                - Use filters to narrow down the dataset before aggregation
+                - Date range provides convenient time-based filtering
+                - Useful for dashboards, reports, and business metrics
             """
             return await self._execute_tool("analytics_query", {
                 "model": model,
@@ -561,34 +1071,21 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
     async def _handle_get_record(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle get_record tool using Zenoo RPC OdooModel."""
         try:
-            from ..models.registry import get_model_class
-
             model_name = args["model"]
             record_id = args["record_id"]
             fields = args.get("fields")
 
-            # Try to get registered model class for type safety
-            try:
-                model_class = get_model_class(model_name)
-                query = self.zenoo_client.model(model_class)
-            except (KeyError, ImportError):
-                # Fallback to dynamic model access
-                query = self.zenoo_client.model(model_name)
+            # Use read() for direct Odoo access - most reliable method
+            records = await self.zenoo_client.read(
+                model=model_name,
+                ids=[record_id],
+                fields=fields
+            )
 
-            # Get the record
-            if fields:
-                record = await query.filter(id=record_id).values(*fields).first()
-            else:
-                record = await query.get(record_id)
-
-            if not record:
+            if not records:
                 raise MCPToolError(f"Record {record_id} not found in model {model_name}")
 
-            # Convert to serializable format
-            if hasattr(record, 'to_dict'):
-                record_data = record.to_dict()
-            else:
-                record_data = dict(record)
+            record_data = records[0]
 
             return {
                 "record": record_data,
@@ -601,124 +1098,72 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
             raise MCPToolError(f"Failed to get record {args.get('record_id')} from {args.get('model')}: {e}")
     
     async def _handle_create_record(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle create_record tool using Zenoo RPC with transaction support."""
+        """Handle create_record tool using Zenoo RPC."""
         try:
-            from ..models.registry import get_model_class
-
             model_name = args["model"]
             values = args["values"]
 
-            # Use transaction for data integrity
-            async with self.zenoo_client.transaction() as tx:
-                # Try to get registered model class for type safety
-                try:
-                    model_class = get_model_class(model_name)
-                    record = await tx.create(model_class, values)
-                except (KeyError, ImportError):
-                    # Fallback to raw create
-                    record_id = await self.zenoo_client.create(model_name, values)
-                    record = {"id": record_id, **values}
+            # Use direct create() method for reliability
+            # (transactions require setup_transaction_manager() to be called first)
+            record_id = await self.zenoo_client.create(model_name, values)
 
-                # Convert to serializable format
-                if hasattr(record, 'to_dict'):
-                    record_data = record.to_dict()
-                elif hasattr(record, 'id'):
-                    record_data = {"id": record.id, **values}
-                else:
-                    record_data = record
+            # Build record data with ID and values
+            record_data = {"id": record_id, **values}
 
-                return {
-                    "record": record_data,
-                    "model": model_name,
-                    "created": True,
-                    "id": record_data.get("id")
-                }
+            return {
+                "record": record_data,
+                "model": model_name,
+                "created": True,
+                "id": record_id
+            }
 
         except Exception as e:
             logger.error(f"Create record failed: {e}")
             raise MCPToolError(f"Failed to create record in {args.get('model')}: {e}")
     
     async def _handle_update_record(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle update_record tool using Zenoo RPC with transaction support."""
+        """Handle update_record tool using Zenoo RPC."""
         try:
-            from ..models.registry import get_model_class
-
             model_name = args["model"]
             record_id = args["record_id"]
             values = args["values"]
 
-            # Use transaction for data integrity
-            async with self.zenoo_client.transaction() as tx:
-                # Try to get registered model class for type safety
-                try:
-                    model_class = get_model_class(model_name)
-                    # Get existing record
-                    record = await tx.get(model_class, record_id)
-                    if not record:
-                        raise MCPToolError(f"Record {record_id} not found in model {model_name}")
+            # Use direct write() method for reliability
+            # (transactions require setup_transaction_manager() to be called first)
+            success = await self.zenoo_client.write(model_name, [record_id], values)
+            if not success:
+                raise MCPToolError(f"Failed to update record {record_id} in model {model_name}")
 
-                    # Update with new values
-                    updated_record = await tx.update(record, values)
+            # Return updated record data
+            record_data = {"id": record_id, **values}
 
-                    # Convert to serializable format
-                    if hasattr(updated_record, 'to_dict'):
-                        record_data = updated_record.to_dict()
-                    else:
-                        record_data = {"id": record_id, **values}
-
-                except (KeyError, ImportError):
-                    # Fallback to raw update
-                    success = await self.zenoo_client.write(model_name, [record_id], values)
-                    if not success:
-                        raise MCPToolError(f"Failed to update record {record_id}")
-                    record_data = {"id": record_id, **values}
-
-                return {
-                    "record": record_data,
-                    "model": model_name,
-                    "updated": True,
-                    "transaction_id": tx.transaction_id
-                }
+            return {
+                "record": record_data,
+                "model": model_name,
+                "updated": True,
+            }
 
         except Exception as e:
             logger.error(f"Update record failed: {e}")
             raise MCPToolError(f"Failed to update record {args.get('record_id')} in {args.get('model')}: {e}")
     
     async def _handle_delete_record(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle delete_record tool using Zenoo RPC with transaction support."""
+        """Handle delete_record tool using Zenoo RPC."""
         try:
-            from ..models.registry import get_model_class
-
             model_name = args["model"]
             record_id = args["record_id"]
 
-            # Use transaction for data integrity
-            async with self.zenoo_client.transaction() as tx:
-                # Try to get registered model class for type safety
-                try:
-                    model_class = get_model_class(model_name)
-                    # Get existing record first
-                    record = await tx.get(model_class, record_id)
-                    if not record:
-                        raise MCPToolError(f"Record {record_id} not found in model {model_name}")
+            # Use direct unlink() method for reliability
+            # (transactions require setup_transaction_manager() to be called first)
+            success = await self.zenoo_client.unlink(model_name, [record_id])
+            if not success:
+                raise MCPToolError(f"Failed to delete record {record_id} from model {model_name}")
 
-                    # Delete the record
-                    success = await tx.delete(record)
-                    if not success:
-                        raise MCPToolError(f"Failed to delete record {record_id}")
-
-                except (KeyError, ImportError):
-                    # Fallback to raw delete
-                    success = await self.zenoo_client.unlink(model_name, [record_id])
-                    if not success:
-                        raise MCPToolError(f"Failed to delete record {record_id}")
-
-                return {
-                    "id": record_id,
-                    "model": model_name,
-                    "deleted": True,
-                    "transaction_id": tx.transaction_id
-                }
+            return {
+                "id": record_id,
+                "model": model_name,
+                "deleted": True,
+            }
 
         except Exception as e:
             logger.error(f"Delete record failed: {e}")
@@ -907,74 +1352,83 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
     async def _handle_batch_operation(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle batch operations for high performance."""
         try:
-            from ..models.registry import get_model_class
-
             operation = args["operation"]
             model_name = args["model"]
             records = args["records"]
 
-            # Use transaction for batch operations
-            async with self.zenoo_client.transaction() as tx:
-                results = []
+            # Use direct methods for reliability
+            # (transactions require setup_transaction_manager() to be called first)
+            results = []
 
-                if operation == "create":
-                    # Batch create
-                    try:
-                        model_class = get_model_class(model_name)
-                        for record_data in records:
-                            record = await tx.create(model_class, record_data)
-                            results.append(record.to_dict() if hasattr(record, 'to_dict') else record)
-                    except (KeyError, ImportError):
-                        # Fallback to raw batch create
-                        record_ids = await self.zenoo_client.create(model_name, records)
-                        results = [{"id": rid, **data} for rid, data in zip(record_ids, records)]
+            if operation == "create":
+                # Batch create - handle multiple records
+                for record_data in records:
+                    record_id = await self.zenoo_client.create(model_name, record_data)
+                    results.append({"id": record_id, **record_data})
 
-                elif operation == "update":
-                    # Batch update
-                    for record_data in records:
-                        record_id = record_data.pop("id")
-                        success = await self.zenoo_client.write(model_name, [record_id], record_data)
-                        results.append({"id": record_id, "updated": success, **record_data})
+            elif operation == "update":
+                # Batch update
+                for record_data in records:
+                    record_id = record_data.pop("id")
+                    success = await self.zenoo_client.write(model_name, [record_id], record_data)
+                    results.append({"id": record_id, "updated": success, **record_data})
 
-                elif operation == "delete":
-                    # Batch delete
-                    record_ids = [r["id"] for r in records]
-                    success = await self.zenoo_client.unlink(model_name, record_ids)
-                    results = [{"id": rid, "deleted": success} for rid in record_ids]
+            elif operation == "delete":
+                # Batch delete
+                record_ids = [r["id"] for r in records]
+                success = await self.zenoo_client.unlink(model_name, record_ids)
+                results = [{"id": rid, "deleted": success} for rid in record_ids]
 
-                else:
-                    raise MCPToolError(f"Unknown batch operation: {operation}")
+            else:
+                raise MCPToolError(f"Unknown batch operation: {operation}")
 
-                return {
-                    "operation": operation,
-                    "model": model_name,
-                    "processed_count": len(results),
-                    "results": results,
-                    "transaction_id": tx.transaction_id
-                }
+            return {
+                "operation": operation,
+                "model": model_name,
+                "processed_count": len(results),
+                "results": results,
+            }
 
         except Exception as e:
             logger.error(f"Batch operation failed: {e}")
             raise MCPToolError(f"Batch {args.get('operation')} failed for model {args.get('model')}: {e}")
 
     async def _handle_analytics_query(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle analytics queries with aggregation."""
+        """Handle analytics queries with aggregation using Odoo's read_group."""
         try:
-            from ..query import Field
-
             model_name = args["model"]
             group_by = args["group_by"]
             aggregates = args["aggregates"]
             filters = args.get("filters", {})
             date_range = args.get("date_range")
 
-            # Build query
-            query = self.zenoo_client.model(model_name)
+            # Build domain (Odoo filter format)
+            domain = []
 
-            # Apply filters
+            # Apply basic filters
             if filters:
                 for field, value in filters.items():
-                    query = query.filter(**{field: value})
+                    if isinstance(value, dict):
+                        # Handle complex filters
+                        for operator, val in value.items():
+                            if operator == "ne":
+                                domain.append([field, "!=", val])
+                            elif operator == "gt":
+                                domain.append([field, ">", val])
+                            elif operator == "gte":
+                                domain.append([field, ">=", val])
+                            elif operator == "lt":
+                                domain.append([field, "<", val])
+                            elif operator == "lte":
+                                domain.append([field, "<=", val])
+                            elif operator == "in":
+                                domain.append([field, "in", val])
+                            elif operator == "ilike":
+                                domain.append([field, "ilike", val])
+                            else:
+                                domain.append([field, "=", val])
+                    else:
+                        domain.append([field, "=", value])
 
             # Apply date range filter
             if date_range:
@@ -983,40 +1437,42 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
                 date_field = date_range.get("field", "create_date")
 
                 if start_date:
-                    query = query.filter(**{f"{date_field}__gte": start_date})
+                    domain.append([date_field, ">=", start_date])
                 if end_date:
-                    query = query.filter(**{f"{date_field}__lte": end_date})
+                    domain.append([date_field, "<=", end_date])
 
-            # Group by fields
-            query = query.group_by(*group_by)
+            # Build fields list for aggregation
+            # Odoo's read_group requires "field:agg" format
+            fields_to_aggregate = []
+            for alias, agg_spec in aggregates.items():
+                # Parse "function:field" format
+                if ":" in agg_spec:
+                    func, field = agg_spec.split(":", 1)
+                    fields_to_aggregate.append(f"{field}:{func}")
+                else:
+                    # Assume it's just a field name, default to sum
+                    fields_to_aggregate.append(f"{agg_spec}:sum")
 
-            # Add aggregations
-            aggregate_fields = {}
-            for alias, func in aggregates.items():
-                if func == "sum":
-                    aggregate_fields[alias] = Field(alias).sum()
-                elif func == "count":
-                    aggregate_fields[alias] = Field("id").count()
-                elif func == "avg":
-                    aggregate_fields[alias] = Field(alias).avg()
-                elif func == "max":
-                    aggregate_fields[alias] = Field(alias).max()
-                elif func == "min":
-                    aggregate_fields[alias] = Field(alias).min()
-
-            query = query.aggregate(**aggregate_fields)
-
-            # Execute analytics query
-            results = await query.all()
+            # Execute read_group using Odoo RPC
+            results = await self.zenoo_client.execute_kw(
+                model_name,
+                'read_group',
+                [domain],  # domain
+                {
+                    'fields': list(set(fields_to_aggregate + group_by)),  # fields to aggregate + group fields
+                    'groupby': group_by,  # group by fields
+                    'lazy': False  # get all groups at once
+                }
+            )
 
             return {
                 "model": model_name,
+                "groups": results,
                 "group_by": group_by,
                 "aggregates": aggregates,
-                "filters": filters,
+                "filters_applied": filters,
                 "date_range": date_range,
-                "results": [dict(r) for r in results],
-                "count": len(results)
+                "total_groups": len(results)
             }
 
         except Exception as e:
