@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "zenoo-rpc": {
+      "type": "http",
+      "url": "http://your-server-url:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key-here"
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+# Zenoo RPC - MCP HTTP Server Docker Compose
+# Run with: docker-compose up -d
+#
+# Prerequisites:
+# - Set environment variables or create .env file:
+#   - MCP_API_KEYS: API key for authentication
+#   - ODOO_URL: Your Odoo instance URL
+#   - ODOO_DATABASE: Odoo database name
+#   - ODOO_USERNAME: Odoo username
+#   - ODOO_PASSWORD: Odoo password
+
+version: '3.8'
+
+services:
+  zenoo-mcp:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    image: ${CI_REGISTRY_IMAGE:-zenoo-rpc}:${CI_COMMIT_SHA:-latest}
+    container_name: zenoo-mcp-server
+    ports:
+      - "8080:8080"
+    environment:
+      # MCP HTTP Server Configuration
+      - MCP_PORT=8080
+      - MCP_HOST=0.0.0.0
+      - MCP_API_KEYS=${MCP_API_KEYS}
+
+      # Odoo Connection (required for MCP tools)
+      - ODOO_URL=${ODOO_URL}
+      - ODOO_DATABASE=${ODOO_DATABASE}
+      - ODOO_USERNAME=${ODOO_USERNAME}
+      - ODOO_PASSWORD=${ODOO_PASSWORD}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+networks:
+  default:
+    driver: bridge

@@ -208,6 +208,56 @@ curl -X POST http://localhost:8080/tools/analytics_query \
 
 The HTTP server works with any AI agent platform that supports custom tools/APIs:
 
+### Claude Code Integration
+
+To connect Claude Code (Anthropic's CLI) to the Zenoo RPC HTTP server, create a `.mcp.json` file in your project root:
+
+```json
+{
+  "mcpServers": {
+    "zenoo-rpc": {
+      "type": "http",
+      "url": "http://your-server-url:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+Or add to your global Claude settings at `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "zenoo-rpc": {
+      "type": "http",
+      "url": "https://your-public-url.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+After configuration, restart Claude Code. The Odoo tools will be available natively.
+
+**Note:** The `/mcp` endpoint implements the MCP Streamable HTTP protocol for Claude Code. For Letta and other platforms, use the root `/` endpoint with JSON-RPC format.
+
+### Letta Integration
+
+For Letta AI agents, use the JSON-RPC endpoint at `/`:
+
+```json
+{
+  "url": "https://your-server-url.com/",
+  "auth_type": "bearer_token",
+  "token": "your-api-key-here"
+}
+```
+
 ### Expose Server Publicly (Optional)
 
 For cloud-based AI agents, expose your local server:
@@ -220,9 +270,9 @@ bash scripts/start_http_proxy.sh
 ngrok http 8080
 ```
 
-### Configure in Your AI Platform
+### Configure in Other AI Platforms
 
-Most AI platforms (Letta, LangChain, AutoGPT, etc.) need:
+Most AI platforms (LangChain, AutoGPT, etc.) need:
 - **URL/Endpoint**: Your server URL (e.g., `https://abc123.ngrok.io` or `http://localhost:8080`)
 - **Authentication**: Bearer Token
 - **Token**: Value from `MCP_API_KEYS` in `.env`

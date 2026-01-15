@@ -1,4 +1,6 @@
-# Multi-stage build for production optimization
+# Zenoo RPC - MCP HTTP Server Docker Image
+# This image runs the MCP HTTP proxy server on port 8080
+
 FROM python:3.11-slim as builder
 
 # Install build dependencies
@@ -11,13 +13,18 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy requirements and install dependencies
-COPY requirements.txt /tmp/requirements.txt
-COPY requirements-prod.txt /tmp/requirements-prod.txt
+# Set working directory for building
+WORKDIR /build
 
+# Copy files needed for pip install
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+# Install dependencies - core + mcp + aiohttp (for http proxy)
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /tmp/requirements.txt && \
-    pip install --no-cache-dir -r /tmp/requirements-prod.txt
+    pip install --no-cache-dir . && \
+    pip install --no-cache-dir "aiohttp>=3.9.0" "mcp>=1.0.0"
+
 
 # Production stage
 FROM python:3.11-slim as production
@@ -25,8 +32,6 @@ FROM python:3.11-slim as production
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    postgresql-client \
-    redis-tools \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -40,37 +45,24 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set working directory
 WORKDIR /app
 
-# Copy application code
+# Copy application source code
 COPY src/ ./src/
-COPY config/ ./config/
-COPY deployment/scripts/ ./scripts/
 
-# Copy MCP HTTP Server
+# Copy MCP HTTP Proxy server
 COPY mcp_http_proxy.py ./mcp_http_proxy.py
 
-# Copy configuration templates
-COPY deployment/config/production.yaml ./config/production.yaml
-COPY deployment/config/logging.yaml ./config/logging.yaml
-
-# Create necessary directories
-RUN mkdir -p /app/logs /app/data /app/tmp && \
+# Create necessary directories and set ownership
+RUN mkdir -p /app/logs /app/tmp && \
     chown -R zenoo:zenoo /app
 
 # Set environment variables
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV ENVIRONMENT=production
-ENV LOG_LEVEL=INFO
-ENV WORKERS=4
 
 # MCP HTTP Server defaults (port 8080)
 ENV MCP_PORT=8080
 ENV MCP_HOST=0.0.0.0
-
-# Health check script
-COPY deployment/scripts/healthcheck.py ./healthcheck.py
-RUN chmod +x ./healthcheck.py
 
 # Switch to non-root user
 USER zenoo
@@ -79,8 +71,8 @@ USER zenoo
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${MCP_PORT:-8080}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${MCP_PORT}/health || exit 1
 
-# Default command - Start MCP HTTP Server on port 8080
+# Start MCP HTTP Server
 CMD ["python", "mcp_http_proxy.py"]

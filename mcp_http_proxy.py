@@ -34,6 +34,8 @@ Endpoints:
     GET  /health     - Health check
     GET  /tools      - List all MCP tools
     POST /tools/{name} - Call a specific tool
+    POST /           - JSON-RPC (Letta format)
+    POST /mcp        - Streamable HTTP (Claude Code format)
 
 Authentication:
     Authorization: Bearer <api-key>
@@ -253,7 +255,8 @@ class MCPHttpProxy:
             'description': 'HTTP proxy for Zenoo MCP Server (stdio backend)',
             'endpoints': {
                 'GET /': 'Server info',
-                'POST /': 'Call a tool (Letta format)',
+                'POST /': 'JSON-RPC (Letta format)',
+                'POST /mcp': 'Streamable HTTP (Claude Code)',
                 'GET /health': 'Health check',
                 'GET /tools': 'List available tools',
                 'POST /tools/{tool_name}': 'Call a tool',
@@ -404,9 +407,178 @@ class MCPHttpProxy:
                     },
                     'id': request_id
                 }, status=404)
-            
+
         except Exception as e:
             logger.error(f"Error in POST /: {e}")
+            import traceback
+            traceback.print_exc()
+            return web.json_response({
+                'jsonrpc': '2.0',
+                'error': {
+                    'code': -32603,
+                    'message': str(e)
+                },
+                'id': body.get('id') if 'body' in locals() else None
+            }, status=500)
+
+    async def handle_mcp_streamable(self, request):
+        """Handle POST /mcp - Streamable HTTP transport for Claude Code.
+
+        This implements the MCP Streamable HTTP protocol that Claude Code expects.
+        It handles JSON-RPC messages and returns responses in the expected format.
+        """
+        # Check authentication
+        if not self.check_auth(request):
+            logger.warning("POST /mcp - Authentication failed")
+            return web.json_response({'error': 'Unauthorized'}, status=401)
+
+        try:
+            # Parse JSON-RPC request
+            try:
+                body = await request.json()
+            except Exception as e:
+                logger.error(f"Failed to parse JSON body in /mcp: {e}")
+                return web.json_response({
+                    'jsonrpc': '2.0',
+                    'error': {'code': -32700, 'message': f'Parse error: {str(e)}'},
+                    'id': None
+                }, status=400)
+
+            logger.info(f"Streamable HTTP /mcp request: {body.get('method')} (id: {body.get('id')})")
+
+            # Extract JSON-RPC fields
+            method = body.get('method')
+            params = body.get('params', {})
+            request_id = body.get('id')
+
+            # Handle MCP protocol methods
+            if method == 'initialize':
+                # Get client's requested protocol version and negotiate
+                client_version = params.get('protocolVersion', '2024-11-05')
+                # Support latest versions - use client's version if we support it
+                supported_versions = ['2025-03-26', '2024-11-05', '2024-10-07']
+                negotiated_version = client_version if client_version in supported_versions else '2024-11-05'
+
+                logger.info(f"Streamable HTTP initialize request (client: {client_version}, negotiated: {negotiated_version})")
+                return web.json_response({
+                    'jsonrpc': '2.0',
+                    'result': {
+                        'protocolVersion': negotiated_version,
+                        'capabilities': {
+                            'tools': {'listChanged': False}
+                        },
+                        'serverInfo': {
+                            'name': 'zenoo-mcp-server',
+                            'version': '1.0.0'
+                        }
+                    },
+                    'id': request_id
+                })
+
+            elif method == 'initialized':
+                # Client acknowledges initialization
+                logger.info("Streamable HTTP initialized notification")
+                return web.Response(status=204)
+
+            elif method == 'tools/list':
+                logger.info("Streamable HTTP tools/list request")
+                result = await self.mcp_client.list_tools()
+
+                if isinstance(result, list):
+                    tools = result
+                elif hasattr(result, 'tools'):
+                    tools = result.tools
+                else:
+                    tools = []
+
+                return web.json_response({
+                    'jsonrpc': '2.0',
+                    'result': {
+                        'tools': [
+                            {
+                                'name': tool.name,
+                                'description': tool.description or '',
+                                'inputSchema': tool.inputSchema
+                            }
+                            for tool in tools
+                        ]
+                    },
+                    'id': request_id
+                })
+
+            elif method == 'tools/call':
+                tool_name = params.get('name')
+                arguments = params.get('arguments', {})
+
+                if not tool_name:
+                    return web.json_response({
+                        'jsonrpc': '2.0',
+                        'error': {
+                            'code': -32602,
+                            'message': 'Invalid params: missing tool name'
+                        },
+                        'id': request_id
+                    }, status=400)
+
+                logger.info(f"Streamable HTTP tools/call: {tool_name}")
+                result = await self.mcp_client.call_tool(tool_name, arguments)
+
+                # Convert result to MCP format
+                if hasattr(result, 'content'):
+                    content = []
+                    for content_item in result.content:
+                        if hasattr(content_item, 'text'):
+                            content.append({
+                                'type': 'text',
+                                'text': content_item.text
+                            })
+                        else:
+                            content.append({
+                                'type': 'text',
+                                'text': str(content_item)
+                            })
+
+                    return web.json_response({
+                        'jsonrpc': '2.0',
+                        'result': {
+                            'content': content,
+                            'isError': getattr(result, 'isError', False)
+                        },
+                        'id': request_id
+                    })
+                else:
+                    return web.json_response({
+                        'jsonrpc': '2.0',
+                        'result': {
+                            'content': [{'type': 'text', 'text': str(result)}]
+                        },
+                        'id': request_id
+                    })
+
+            elif method == 'ping':
+                return web.json_response({
+                    'jsonrpc': '2.0',
+                    'result': {},
+                    'id': request_id
+                })
+
+            elif method and method.startswith('notifications/'):
+                logger.info(f"Streamable HTTP notification: {method}")
+                return web.Response(status=204)
+
+            else:
+                logger.warning(f"Streamable HTTP unknown method: {method}")
+                return web.json_response({
+                    'jsonrpc': '2.0',
+                    'error': {
+                        'code': -32601,
+                        'message': f'Method not found: {method}'
+                    },
+                    'id': request_id
+                }, status=404)
+
+        except Exception as e:
+            logger.error(f"Error in POST /mcp: {e}")
             import traceback
             traceback.print_exc()
             return web.json_response({
@@ -431,7 +603,8 @@ async def create_app(api_key=None, python_path=None):
     
     # Add routes
     app.router.add_get('/', proxy.handle_info)
-    app.router.add_post('/', proxy.handle_root_post)  # Letta format
+    app.router.add_post('/', proxy.handle_root_post)  # Letta format (JSON-RPC)
+    app.router.add_post('/mcp', proxy.handle_mcp_streamable)  # Claude Code format (Streamable HTTP)
     app.router.add_get('/health', proxy.handle_health)
     app.router.add_get('/tools', proxy.handle_list_tools)
     app.router.add_post('/tools/{tool_name}', proxy.handle_call_tool)
@@ -506,7 +679,8 @@ Configure in Letta Cloud:
     print(f"Access at: http://{args.host}:{args.port}")
     print()
     print("Endpoints:")
-    print("  POST /           - Tool call (Letta format)")
+    print("  POST /           - JSON-RPC (Letta format)")
+    print("  POST /mcp        - Streamable HTTP (Claude Code)")
     print("  GET  /           - Server info")
     print("  GET  /health     - Health check")
     print("  GET  /tools      - List all tools")

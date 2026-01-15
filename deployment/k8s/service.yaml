@@ -1,0 +1,41 @@
+# Zenoo RPC - MCP HTTP Server Kubernetes Service
+# Exposes the MCP HTTP server on port 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zenoo-mcp
+  namespace: zenoo-mcp
+  labels:
+    app: zenoo-mcp
+spec:
+  type: LoadBalancer
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: zenoo-mcp
+
+---
+# NodePort Service (alternative for minikube)
+# Use: minikube service zenoo-mcp-nodeport -n zenoo-mcp
+apiVersion: v1
+kind: Service
+metadata:
+  name: zenoo-mcp-nodeport
+  namespace: zenoo-mcp
+  labels:
+    app: zenoo-mcp
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30080
+    protocol: TCP
+  selector:
+    app: zenoo-mcp
