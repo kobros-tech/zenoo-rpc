@@ -932,7 +932,147 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
                 "filters": filters or {},
                 "date_range": date_range
             })
-    
+
+        @self.mcp_server.tool()
+        async def execute_method(
+            model: str,
+            method: str,
+            args: List[Any] = None,
+            kwargs: Dict[str, Any] = None
+        ) -> Dict[str, Any]:
+            """Execute any method on an Odoo model - the universal method caller.
+
+            This is the most flexible tool that allows calling ANY method available on an Odoo model.
+            Use this for workflow actions, business logic methods, computed operations, and any
+            custom methods defined in Odoo modules.
+
+            Args:
+                model: Odoo model name (e.g., 'sale.order', 'res.partner', 'account.move')
+
+                method: Method name to execute on the model. Common methods include:
+                    Workflow/Actions:
+                    - 'action_confirm': Confirm orders/invoices
+                    - 'action_cancel': Cancel documents
+                    - 'action_done': Mark as done
+                    - 'action_draft': Reset to draft
+                    - 'action_post': Post journal entries
+                    - 'button_validate': Validate transfers
+
+                    Data Operations:
+                    - 'copy': Duplicate a record (pass record ID in args)
+                    - 'default_get': Get default values for fields
+                    - 'fields_get': Get field definitions
+                    - 'name_search': Search by name
+                    - 'name_get': Get display names for IDs
+
+                    Computations:
+                    - 'get_views': Get view definitions
+                    - 'check_access_rights': Check user permissions
+                    - Any custom method defined in the model
+
+                args: Positional arguments for the method (default: [])
+                    Format: List of values passed to the method
+                    Examples:
+                    - For methods on specific records: [[record_id]] or [[id1, id2, ...]]
+                    - For copy: [record_id]
+                    - For name_search: ['search_term']
+                    - For fields_get: [] or [['field1', 'field2']]
+
+                kwargs: Keyword arguments for the method (default: {})
+                    Format: Dictionary of named parameters
+                    Examples:
+                    - {'context': {'lang': 'en_US'}}
+                    - {'limit': 10, 'operator': 'ilike'}
+
+            Returns:
+                Dictionary with:
+                - model: Model name
+                - method: Method that was executed
+                - result: Return value from the method (varies by method)
+                - success: True if execution completed
+
+            Examples:
+                # Confirm a sales order
+                {
+                    "model": "sale.order",
+                    "method": "action_confirm",
+                    "args": [[42]]
+                }
+
+                # Post an invoice
+                {
+                    "model": "account.move",
+                    "method": "action_post",
+                    "args": [[150]]
+                }
+
+                # Duplicate a partner record
+                {
+                    "model": "res.partner",
+                    "method": "copy",
+                    "args": [25],
+                    "kwargs": {"default": {"name": "Copy of Partner"}}
+                }
+
+                # Get default values for new sale order
+                {
+                    "model": "sale.order",
+                    "method": "default_get",
+                    "args": [["partner_id", "date_order", "pricelist_id"]]
+                }
+
+                # Search partners by name
+                {
+                    "model": "res.partner",
+                    "method": "name_search",
+                    "args": ["Acme"],
+                    "kwargs": {"limit": 10, "operator": "ilike"}
+                }
+
+                # Get field definitions for a model
+                {
+                    "model": "res.partner",
+                    "method": "fields_get",
+                    "args": [["name", "email", "phone"]],
+                    "kwargs": {"attributes": ["string", "type", "required"]}
+                }
+
+                # Check access rights
+                {
+                    "model": "sale.order",
+                    "method": "check_access_rights",
+                    "args": ["write"],
+                    "kwargs": {"raise_exception": false}
+                }
+
+                # Cancel multiple orders
+                {
+                    "model": "sale.order",
+                    "method": "action_cancel",
+                    "args": [[10, 11, 12]]
+                }
+
+                # Validate a stock picking
+                {
+                    "model": "stock.picking",
+                    "method": "button_validate",
+                    "args": [[75]]
+                }
+
+            Notes:
+                - Methods that operate on records typically expect record IDs in a list: [[id1, id2]]
+                - Some methods return True/False, others return data structures
+                - Check Odoo model documentation for available methods
+                - Custom module methods are also accessible
+                - Use this for any operation not covered by basic CRUD tools
+            """
+            return await self._execute_tool("execute_method", {
+                "model": model,
+                "method": method,
+                "args": args or [],
+                "kwargs": kwargs or {}
+            })
+
     def _register_resources(self) -> None:
         """Register MCP resources."""
         if not self.config.features.enable_resources:
@@ -999,6 +1139,8 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
                 return await self._handle_batch_operation(arguments)
             elif tool_name == "analytics_query":
                 return await self._handle_analytics_query(arguments)
+            elif tool_name == "execute_method":
+                return await self._handle_execute_method(arguments)
             else:
                 raise MCPToolError(f"Unknown tool: {tool_name}")
                 
@@ -1478,3 +1620,30 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
         except Exception as e:
             logger.error(f"Analytics query failed: {e}")
             raise MCPToolError(f"Analytics query failed for model {args.get('model')}: {e}")
+
+    async def _handle_execute_method(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle execute_method tool - execute any method on an Odoo model."""
+        try:
+            model_name = args["model"]
+            method_name = args["method"]
+            method_args = args.get("args", [])
+            method_kwargs = args.get("kwargs", {})
+
+            # Execute the method using execute_kw
+            result = await self.zenoo_client.execute_kw(
+                model_name,
+                method_name,
+                method_args,
+                method_kwargs
+            )
+
+            return {
+                "model": model_name,
+                "method": method_name,
+                "result": result,
+                "success": True
+            }
+
+        except Exception as e:
+            logger.error(f"Execute method failed: {e}")
+            raise MCPToolError(f"Failed to execute {args.get('method')} on {args.get('model')}: {e}")
