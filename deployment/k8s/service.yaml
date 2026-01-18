@@ -56,7 +56,12 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # TLS termination handled by external NGINX (your server)
+    # If using cert-manager in K8s, uncomment below:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  # TLS is handled by your external NGINX server with Let's Encrypt
+  # The Ingress receives HTTP from your NGINX after SSL termination
   rules:
   - host: dev.kobros-tech.com
     http:
