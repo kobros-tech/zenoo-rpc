@@ -250,6 +250,9 @@ class MCPHttpProxy:
     
     async def handle_info(self, request):
         """Handle GET / - server info."""
+        if not self.check_auth(request):
+            return web.json_response({'error': 'Unauthorized'}, status=401)
+
         return web.json_response({
             'name': 'MCP HTTP Proxy',
             'description': 'HTTP proxy for Zenoo MCP Server (stdio backend)',
