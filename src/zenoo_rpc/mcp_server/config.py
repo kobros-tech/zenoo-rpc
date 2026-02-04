@@ -148,8 +148,8 @@ class MCPServerConfig:
         config.host = os.getenv("MCP_HOST", config.host)
         config.port = int(os.getenv("MCP_PORT", str(config.port)))
         
-        # Odoo connection
-        config.odoo_url = os.getenv("ODOO_URL", config.odoo_url)
+        # Odoo connection (support both ODOO_URL and ODOO_HOST for backwards compatibility)
+        config.odoo_url = os.getenv("ODOO_URL") or os.getenv("ODOO_HOST") or config.odoo_url
         config.odoo_database = os.getenv("ODOO_DATABASE", config.odoo_database)
         config.odoo_username = os.getenv("ODOO_USERNAME", config.odoo_username)
         config.odoo_password = os.getenv("ODOO_PASSWORD", config.odoo_password)
