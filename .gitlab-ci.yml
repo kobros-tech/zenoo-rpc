@@ -135,8 +135,8 @@ deploy:
       echo "MCP Server Deployed Successfully!"
       echo "=============================================="
       echo ""
-      echo "Secure URL (Production):"
-      echo "   https://dev.kobros-tech.com"
+      echo "Secure URL:"
+      echo "   https://zenoo.dev.kobros-tech.com"
       echo ""
       echo "API Key:"
       echo "   $MCP_API_KEYS"
@@ -147,16 +147,16 @@ deploy:
       echo "Example curl commands:"
       echo ""
       echo "  Health Check (public):"
-      echo "   curl https://dev.kobros-tech.com/health"
+      echo "   curl https://zenoo.dev.kobros-tech.com/health"
       echo ""
       echo "  Server Info (authenticated):"
-      echo "   curl -X GET https://dev.kobros-tech.com -H 'Authorization: Bearer $MCP_API_KEYS'"
+      echo "   curl -X GET https://zenoo.dev.kobros-tech.com -H 'Authorization: Bearer $MCP_API_KEYS'"
       echo ""
       echo "  List Tools:"
-      echo "   curl https://dev.kobros-tech.com/tools -H 'Authorization: Bearer $MCP_API_KEYS'"
+      echo "   curl https://zenoo.dev.kobros-tech.com/tools -H 'Authorization: Bearer $MCP_API_KEYS'"
       echo ""
       echo "  Call MCP (JSON-RPC):"
-      echo "   curl -X POST https://dev.kobros-tech.com/mcp \\"
+      echo "   curl -X POST https://zenoo.dev.kobros-tech.com/mcp \\"
       echo "     -H 'Content-Type: application/json' \\"
       echo "     -H 'Authorization: Bearer $MCP_API_KEYS' \\"
       echo "     -d '{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":1}'"
@@ -168,6 +168,4 @@ deploy:
   when: manual
   environment:
     name: production
-    # URL will be the LoadBalancer external IP or your configured domain
-    # For minikube: minikube service zenoo-mcp-nodeport -n zenoo-mcp --url
-    # For cloud: kubectl get svc zenoo-mcp -n zenoo-mcp (check EXTERNAL-IP)
+    url: https://zenoo.dev.kobros-tech.com
