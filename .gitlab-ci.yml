@@ -5,6 +5,7 @@
 #   CI_REGISTRY_USER     - GitLab registry username (auto-provided)
 #   CI_REGISTRY_PASSWORD - GitLab registry password (auto-provided)
 #   MCP_API_KEYS         - API key for MCP server authentication
+#   DO_API_TOKEN         - DigitalOcean API token (for dynamic kubeconfig)
 #   ODOO_URL             - Odoo instance URL
 #   ODOO_DATABASE        - Odoo database name
 #   ODOO_USERNAME        - Odoo username
@@ -92,10 +93,25 @@ deploy:
   stage: deploy
   variables:
     KUBECONFIG: /tmp/kubeconfig
+  before_script:
+    # Install doctl to dynamically generate kubeconfig (avoids token expiration)
+    - mkdir -p /tmp/bin
+    - export PATH="/tmp/bin:$PATH"
+    - export USER="${USER:-ci}"
+    - curl -sL https://github.com/digitalocean/doctl/releases/download/v1.104.0/doctl-1.104.0-linux-amd64.tar.gz | tar xz -C /tmp/bin
+    - |
+      if [ -z "$DO_API_TOKEN" ]; then
+        echo "ERROR: DO_API_TOKEN is not set. Check GitLab CI/CD variable settings:"
+        echo "  - Ensure the variable exists in Settings > CI/CD > Variables"
+        echo "  - If marked 'Protected', uncheck it or protect the branch"
+        exit 1
+      fi
+    - export DIGITALOCEAN_ACCESS_TOKEN="$DO_API_TOKEN"
+    - echo "Available clusters:" && doctl kubernetes cluster list --format ID,Name,Region --no-header
+    - doctl kubernetes cluster kubeconfig save "$(doctl kubernetes cluster list --format ID --no-header | head -1)"
+    - chmod 600 "$KUBECONFIG"
   script:
     - echo "Deploying Zenoo MCP Server to Kubernetes..."
-    - printf '%s\n' "$KUBECONFIG_CONTENT" > /tmp/kubeconfig
-    - chmod 600 /tmp/kubeconfig
     - kubectl cluster-info
     # Create namespace if it doesn't exist
     - kubectl create namespace zenoo-mcp --dry-run=client -o yaml | kubectl apply -f -
