@@ -93,6 +93,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+import ast
+
+def sanitize_arguments(arguments: dict) -> dict:
+    """
+    Letta sometimes sends dict-typed argument values as Python-repr strings
+    e.g. values="{'name': 'foo'}" instead of values={'name': 'foo'}.
+    This function detects and parses those string values back into real objects.
+    Also handles JSON strings for robustness.
+    """
+    if not isinstance(arguments, dict):
+        return arguments
+
+    sanitized = {}
+    for key, value in arguments.items():
+        if isinstance(value, str):
+            stripped = value.strip()
+            # Try JSON first (safer), then Python literal eval
+            if stripped.startswith(('{', '[', '"')):
+                try:
+                    sanitized[key] = json.loads(stripped)
+                    logger.debug(f"Parsed arg '{key}' from JSON string to {type(sanitized[key]).__name__}")
+                    continue
+                except json.JSONDecodeError:
+                    pass
+                try:
+                    parsed = ast.literal_eval(stripped)
+                    if isinstance(parsed, (dict, list)):
+                        sanitized[key] = parsed
+                        logger.debug(f"Parsed arg '{key}' from Python literal to {type(parsed).__name__}")
+                        continue
+                except (ValueError, SyntaxError):
+                    pass
+        sanitized[key] = value
+    return sanitized
+
 class MCPHttpProxy:
     """HTTP proxy that wraps an stdio MCP server."""
     
@@ -204,7 +239,7 @@ class MCPHttpProxy:
         try:
             # Get request body
             body = await request.json()
-            arguments = body.get('arguments', {})
+            arguments = sanitize_arguments(body.get('arguments', {}))
             
             # Call the tool
             logger.info(f"Calling tool: {tool_name} with args: {arguments}")
@@ -346,7 +381,7 @@ class MCPHttpProxy:
             elif method == 'tools/call':
                 # Call a tool
                 tool_name = params.get('name')
-                arguments = params.get('arguments', {})
+                arguments = sanitize_arguments(params.get('arguments', {}))
                 
                 if not tool_name:
                     logger.error(f"Missing tool name in tools/call: {params}")
@@ -511,7 +546,7 @@ class MCPHttpProxy:
 
             elif method == 'tools/call':
                 tool_name = params.get('name')
-                arguments = params.get('arguments', {})
+                arguments = sanitize_arguments(params.get('arguments', {}))
 
                 if not tool_name:
                     return web.json_response({
