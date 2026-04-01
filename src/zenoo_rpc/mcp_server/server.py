@@ -212,6 +212,7 @@ Rate Limits: {self.config.security.rate_limit_requests} requests per {self.confi
                 self.config.odoo_username,
                 self.config.odoo_password
             )
+            await self.zenoo_client.setup_transaction_manager()
             logger.info("Connected to Odoo successfully")
         except Exception as e:
             logger.error(f"Failed to connect to Odoo: {e}")
